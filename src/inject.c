@@ -16,7 +16,7 @@
  * call _ax
  * int3
  * nop (to make it aligned with 16 bits for not corrupting our own stack
- * with the read/write data symtion)
+ * with the read/write data function)
  */
 
 uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90};
@@ -122,7 +122,7 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     if (ptr_sym.p == NULL)
     {
-        ERR("couldn't find symtion %s in shared lib %s in current process\n",
+        ERR("couldn't find symbol %s in shared lib %s in current process\n",
             sym,
             lm->l_name);
         goto ret;
@@ -149,7 +149,7 @@ ret:
 }
 
 // TODO: There is still a case where the remote process haven't the library
-// loaded.. So we can just use this symtion to get dlopen and load our libs on
+// loaded.. So we can just use this function to get dlopen and load our libs on
 // the remote process!
 
 ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
@@ -216,7 +216,7 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
         }
 
         // Okay this is good, now we load it for our current process
-        // and we can extract the symtion address from remote process.
+        // and we can extract the symbol address from remote process.
         lm = (link_map_t*)dlopen(remote_lib.filename.pc, RTLD_LAZY);
         if (lm != NULL)
         {
