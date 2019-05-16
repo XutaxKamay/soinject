@@ -621,7 +621,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     write_data(pid, data, bytes_to_write, out);
 
-    printf("New instructions have been written for mmap call on pid %i\n", pid);
+    printf("New instructions have been written for dlopen call on pid %i\n", pid);
 
     printf("Executing shellcode on pid %i\n", pid);
 
