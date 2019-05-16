@@ -20,9 +20,7 @@
  */
 
 uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90};
-
-const uintptr_t g_page_size = sysconf(_SC_PAGESIZE);
-char g_dllPath[FILENAME_MAX];
+uintptr_t g_page_size;
 const int str_hex_digits = sizeof(ptr_t) * 2;
 
 void setup_string(string_t* str, size_t maxlen)
@@ -666,6 +664,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
 int main(int cargs, char** args)
 {
+    g_page_size = sysconf(_SC_PAGESIZE);
+
     pid_t pid;
     printf("Please enter pid\n");
     scanf("%i", &pid);
