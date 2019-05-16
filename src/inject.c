@@ -445,14 +445,15 @@ ptr_t remote_mmap(pid_t pid,
     // Arguments are passed through stack here.
     // Save up some space on stack to prepare our arguments
     regs.esp -= sizeof(stack_arguments);
-    regs.eax = remote_mmap_addr.ui;
 
-    stack_arguments[0] = 0;                                              // addr
+    stack_arguments[0] = (uintptr_t)addr;                                // addr
     stack_arguments[1] = (((size - 1) / g_page_size) + 1) * g_page_size; // len
     stack_arguments[2] = prot;                                           // prot
-    stack_arguments[3] = MAP_PRIVATE | MAP_ANONYMOUS; // flags
-    stack_arguments[4] = -1;                          // file descriptor
-    stack_arguments[5] = 0;                           // offset
+    stack_arguments[3] = flags;  // flags
+    stack_arguments[4] = fd;     // file descriptor
+    stack_arguments[5] = offset; // offset
+
+    regs.eax = remote_mmap_addr.ui;
 
     printf("Writing arguments on the stack %p on pid %i\n", regs.esp, pid);
 
@@ -576,14 +577,19 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     remote_filename_addr = regs.sp;
 
 #ifdef MX64
-    
+
     regs.rdi = remote_filename_addr;
     regs.rsi = (uintptr_t)flags;
     regs.rax = remote_dlopen_addr.ui;
 
 #else
 
-    regs.ebp = regs.esp;
+    // Should be done this way:
+    // push flags
+    // push strlib
+    // call eax
+    // int3
+
     *(uintptr_t*)((uintptr_t)stack_arguments) = remote_filename_addr;
     *(int*)((uintptr_t)stack_arguments + sizeof(ptr_t)) = flags;
 
