@@ -455,7 +455,7 @@ ptr_t remote_mmap(pid_t pid,
 
     regs.eax = remote_mmap_addr.ui;
 
-    printf("Writing arguments on the stack %p on pid %i\n", regs.esp, pid);
+    printf("Writing arguments on the stack %p on pid %i\n", (ptr_t)regs.esp, pid);
 
     out.ui = regs.esp;
     data.p = stack_arguments;
@@ -564,7 +564,19 @@ ptr_t remote_dlopen(pid_t pid,
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-    /*
+// I've no idea why it doesn't work for both archs here..
+// Weird, needs investigation
+#ifndef MX64
+    remote_filename_addr = (uintptr_t)remote_allocated_memory;
+
+    out.ui = remote_filename_addr;
+    data.p = filename;
+
+    write_data(pid, data, sizeof(filename), out);
+
+    *(uintptr_t*)(&remote_allocated_memory) += sizeof(filename);
+#else 
+
     regs.sp -= sizeof(filename);
 
     strcpy(filename, lib);
@@ -578,16 +590,8 @@ ptr_t remote_dlopen(pid_t pid,
     printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
 
     remote_filename_addr = regs.sp;
-    */
 
-    remote_filename_addr = (uintptr_t)remote_allocated_memory;
-
-    out.ui = remote_filename_addr;
-    data.p = filename;
-
-    write_data(pid, data, sizeof(filename), out);
-
-    *(uintptr_t*)(&remote_allocated_memory) += sizeof(filename);
+#endif 
 
 #ifdef MX64
 
