@@ -244,7 +244,8 @@ ret:
     return result;
 }
 
-/* Old way and eats a lot of ressources. Maybe save it for later just in case.
+/*
+// Old way and eats a lot of ressources. Maybe save it for later just in case.
 static int list_shared_libs(struct dl_phdr_info* info, size_t size, ptr_t
 lib_infos_p)
 {
@@ -438,6 +439,7 @@ ptr_t remote_mmap(pid_t pid,
     regs.r8 = fd;     // file descriptor
     regs.r9 = offset; // offset
     regs.rax = remote_mmap_addr.ui;
+
 #else
 
     // Arguments are passed through stack here.
@@ -523,15 +525,18 @@ ptr_t remote_mmap(pid_t pid,
     return (ptr_t)regs.ax;
 }
 
-ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
+ptr_t remote_dlopen(pid_t pid,
+                    const char* lib,
+                    int flags,
+                    ptr_t remote_allocated_memory)
 {
     char filename[PATH_MAX];
     struct user_regs_struct oldregs, regs;
     size_t bytes_to_write = sizeof(shellcode_call);
-    uint8_t backup_data[bytes_to_write];
     ptr_u_t data, out, remote_dlopen_addr;
     int status;
     uintptr_t remote_filename_addr;
+
 #ifndef MX64
     unsigned char stack_arguments[sizeof(flags) + sizeof(ptr_t)];
 #endif
@@ -559,7 +564,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-    // Reserve stack space for dl_open_payload_t structure
+    /*
     regs.sp -= sizeof(filename);
 
     strcpy(filename, lib);
@@ -573,6 +578,16 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
 
     remote_filename_addr = regs.sp;
+    */
+
+    remote_filename_addr = (uintptr_t)remote_allocated_memory;
+
+    out.ui = remote_filename_addr;
+    data.p = filename;
+
+    write_data(pid, data, sizeof(filename), out);
+
+    *(uintptr_t*)(&remote_allocated_memory) += sizeof(filename);
 
 #ifdef MX64
 
@@ -602,24 +617,19 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
 #endif
 
+    regs.ip = (uintptr_t)remote_allocated_memory;
+
     // Set the new registers
     ptrace(PTRACE_SETREGS, pid, NULL, &regs);
 
-    // Backup instructions
-    data.ui = regs.ip;
-    out.p = backup_data;
-
-    read_data(pid, data, bytes_to_write, out);
-
-    printf("Data has been read for backing up instructions on pid %i\n", pid);
-
     // Write shellcode
-    out.ui = regs.ip;
+    out.p = remote_allocated_memory;
     data.p = shellcode_call;
 
     write_data(pid, data, bytes_to_write, out);
 
-    printf("New instructions have been written for dlopen call on pid %i\n", pid);
+    printf("New instructions have been written for dlopen call on pid %i\n",
+           pid);
 
     printf("Executing shellcode on pid %i\n", pid);
 
@@ -642,14 +652,6 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     // Get registers again in order to get the return value
     ptrace(PTRACE_GETREGS, pid, NULL, &regs);
 
-    // Set back the assembly instructions
-    data.p = backup_data;
-    out.ui = oldregs.ip;
-
-    printf("Setting back old instructions at %p on pid %i\n", out.p, pid);
-
-    write_data(pid, data, bytes_to_write, out);
-
     // Set up old registers back again
     ptrace(PTRACE_SETREGS, pid, NULL, &oldregs);
 
@@ -670,24 +672,28 @@ int main(int cargs, char** args)
     printf("Please enter pid\n");
     scanf("%i", &pid);
 
-    ptr_t mmap_test = remote_mmap(pid,
-                                  NULL,
-                                  g_page_size,
-                                  PROT_EXEC | PROT_WRITE | PROT_READ,
-                                  MAP_PRIVATE | MAP_ANONYMOUS,
-                                  -1,
-                                  0);
+    // Let's preallocate some memory
+    ptr_t remote_allocated_memory = remote_mmap(pid,
+                                                NULL,
+                                                g_page_size * 3,
+                                                PROT_EXEC | PROT_WRITE |
+                                                    PROT_READ,
+                                                MAP_PRIVATE | MAP_ANONYMOUS,
+                                                -1,
+                                                0);
 #ifdef MX64
     ptr_t dlopen_test = remote_dlopen(pid,
                                       "/lib/x86_64-linux-gnu/libdl-2.28.so",
-                                      RTLD_LAZY);
+                                      RTLD_LAZY,
+                                      remote_allocated_memory);
 #else
     ptr_t dlopen_test = remote_dlopen(pid,
                                       "/lib/i386-linux-gnu/libdl-2.28.so",
-                                      RTLD_LAZY);
+                                      RTLD_LAZY,
+                                      remote_allocated_memory);
 #endif
 
-    printf("dlopen %p mmap test %p\n", dlopen_test, mmap_test);
+    printf("dlopen %p mmap test %p\n", dlopen_test, remote_allocated_memory);
 
     return 0;
 }
