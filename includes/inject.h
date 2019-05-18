@@ -1,6 +1,6 @@
 #ifndef INJECT_H
 #define INJECT_H
-
+#define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
 #include <link.h>

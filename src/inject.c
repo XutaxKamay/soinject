@@ -19,7 +19,7 @@
  * with the read/write data function)
  */
 
-uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90};
+uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90, 0x90, 0x90, 0x90, 0x90};
 uintptr_t g_page_size;
 const int str_hex_digits = sizeof(ptr_t) * 2;
 
@@ -317,6 +317,94 @@ ret:
 }
 */
 
+/*
+int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
+{
+    struct iovec local, remote;
+    size_t nread;
+
+    printf("process_vm_readv %p(%zd) -> pid %i\n", out.p, size, pid);
+
+    local.iov_base = out.p;
+    local.iov_len = size;
+    remote.iov_base = addr.p;
+    remote.iov_len = size;
+
+    nread = process_vm_readv(pid, &local, 1, &remote, 1, 0);
+
+    printf("Read %zd bytes\n", nread);
+
+    if (nread == size)
+    {
+        for (nread = 0LL; nread < size; nread++)
+        {
+            if (nread > 0 && nread % 16 == 0)
+                printf("\n");
+
+            printf("%02X ", *(unsigned char*)(out.ui + size));
+        }
+
+        printf("\n");
+
+        return 1;
+    }
+    else
+    {
+        printf("process_vm_readv failed on pid %i, error: %s\n",
+               pid,
+               strerror(errno));
+        exit(0);
+
+        return 0;
+    }
+}
+
+int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
+{
+    struct iovec local, remote;
+    size_t nwrite;
+
+    printf("process_vm_writev %p(%zd) -> pid %i\n", out.p, size, pid);
+
+    local.iov_base = addr.p;
+    local.iov_len = size;
+    remote.iov_base = out.p;
+    remote.iov_len = size;
+
+    nwrite = process_vm_writev(pid, &local, 1, &remote, 1, 0);
+
+    printf("Wrote %zd bytes\n", nwrite);
+
+    if (nwrite == size)
+    {
+        for (nwrite = 0LL; nwrite < size; nwrite++)
+        {
+            if (nwrite > 0 && nwrite % 16 == 0)
+                printf("\n");
+
+            printf("%02X ", *(unsigned char*)(addr.ui + size));
+        }
+
+        printf("\n");
+
+        return 1;
+    }
+    else
+    {
+        printf("process_vm_writev failed on pid %i, error: %s\n",
+               pid,
+               strerror(errno));
+        exit(0);
+
+        return 0;
+    }
+}
+*/
+
+// After some testing, I noticed that PTRACE_PEEKDATA returns an int
+// but PTRACE_POKEDATA needs to have a ptr size to actually write correctly the bytes
+// Yeah, why not? I'll look into the kernel
+
 int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
     int ret;
@@ -324,8 +412,9 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(uint16_t);
+        size -= sizeof(int);
         ptr.ui = addr.ui + size;
+
         ret = ptrace(PTRACE_PEEKDATA, pid, ptr.p, 0);
 
         if (errno != 0 && ret == -1)
@@ -336,8 +425,8 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> 0x%04X\n", out.p, size, ret & 0xFFFF);
-        *(uint16_t*)(out.ui + size) = ret & 0xFFFF;
+        printf("Reading data %p + %zd -> 0x%08X\n", out.p, size, *(int*)&ret);
+        *(int*)(out.ui + size) = *(int*)&ret;
     }
 
     return 1;
@@ -351,13 +440,16 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(uint16_t);
+        size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
-        printf("Writing data %p + %zd -> 0x%04X\n",
-               out.p,
-               size,
-               *(uint16_t*)ptr.p);
+
+#ifndef MX64
+        printf("Writing data %p + %zd -> 0x%08X\n", out.p, size, *(ptr_t*)ptr.p);
+#else
+        printf(
+            "Writing data %p + %zd -> 0x%016X\n", out.p, size, *(ptr_t*)ptr.p);
+#endif
 
         ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
 
@@ -455,7 +547,9 @@ ptr_t remote_mmap(pid_t pid,
 
     regs.eax = remote_mmap_addr.ui;
 
-    printf("Writing arguments on the stack %p on pid %i\n", (ptr_t)regs.esp, pid);
+    printf("Writing arguments on the stack %p on pid %i\n",
+           (ptr_t)regs.esp,
+           pid);
 
     out.ui = regs.esp;
     data.p = stack_arguments;
@@ -541,6 +635,8 @@ ptr_t remote_dlopen(pid_t pid,
     unsigned char stack_arguments[sizeof(flags) + sizeof(ptr_t)];
 #endif
 
+    strcpy(filename, lib);
+
     remote_dlopen_addr = get_remote_sym("libc", "__libc_dlopen_mode", pid);
 
     if (remote_dlopen_addr.p == NULL)
@@ -566,7 +662,8 @@ ptr_t remote_dlopen(pid_t pid,
 
 // I've no idea why it doesn't work for both archs here..
 // Weird, needs investigation
-#ifndef MX64
+#ifdef false
+
     remote_filename_addr = (uintptr_t)remote_allocated_memory;
 
     out.ui = remote_filename_addr;
@@ -575,7 +672,8 @@ ptr_t remote_dlopen(pid_t pid,
     write_data(pid, data, sizeof(filename), out);
 
     *(uintptr_t*)(&remote_allocated_memory) += sizeof(filename);
-#else 
+
+#else
 
     regs.sp -= sizeof(filename);
 
@@ -591,7 +689,7 @@ ptr_t remote_dlopen(pid_t pid,
 
     remote_filename_addr = regs.sp;
 
-#endif 
+#endif
 
 #ifdef MX64
 
