@@ -420,7 +420,7 @@ int write_data_2(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
 /*
  * Read data to the remote process
- * Seems like a long is used here to pass data
+ * Actually it is a size of ptr
  */
 
 int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
@@ -430,7 +430,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(long);
+        size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
 
         ret = ptrace(PTRACE_PEEKDATA, pid, ptr.p, 0);
@@ -443,8 +443,12 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> 0x%016lX\n", out.p, size, *(long*)&ret);
-        *(long*)(out.ui + size) = *(long*)&ret;
+#ifdef MX64
+        printf("Reading data %p + %zd -> 0x%016lX\n", out.p, size, *(uintptr_t*)&ret);
+#else 
+        printf("Reading data %p + %zd -> 0x%08X\n", out.p, size, *(uintptr_t*)&ret);
+#endif
+        *(ptr_t*)(out.ui + size) = *(ptr_t*)&ret;
     }
 
     return 1;
@@ -452,7 +456,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
 /*
  * Write data to the remote process
- * Seems like a long is used again to pass data
+ * Actually it is a size of ptr
  */
 
 int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
@@ -463,14 +467,20 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(long);
+        size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
+#ifdef MX64
         printf(
-            "Writing data %p + %zd -> 0x%016lX\n", out.p, size, *(long*)ptr.p);
+            "Writing data %p + %zd -> 0x%016lX\n", out.p, size, *(uintptr_t*)ptr.p);
 
-        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(long*)ptr.p);
+#else
+        printf(
+            "Writing data %p + %zd -> 0x%08X\n", out.p, size, *(uintptr_t*)ptr.p);
+
+#endif
+        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
 
         if (ret == -1 && errno != 0)
         {
