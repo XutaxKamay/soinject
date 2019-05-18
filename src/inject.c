@@ -503,7 +503,7 @@ ptr_t remote_mmap(pid_t pid,
     ptr_u_t data, out, remote_mmap_addr;
     int status;
 
-    // Let's find mmap first!
+    // Let's find munmap first!
     remote_mmap_addr = get_remote_sym("libc", "mmap", pid);
 
     if (remote_mmap_addr.p == NULL)
