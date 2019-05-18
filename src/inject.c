@@ -635,19 +635,19 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
     struct user_regs_struct oldregs, regs;
     size_t bytes_to_write = sizeof(shellcode_call);
     uint8_t backup_data[bytes_to_write];
-    ptr_u_t data, out, remote_mmap_addr;
+    ptr_u_t data, out, remote_munmap_addr;
     int status;
 
     // Let's find munmap first!
-    remote_mmap_addr = get_remote_sym("libc", "munmap", pid);
+    remote_munmap_addr = get_remote_sym("libc", "munmap", pid);
 
-    if (remote_mmap_addr.p == NULL)
+    if (remote_munmap_addr.p == NULL)
     {
-        printf("Couldn't find mmap address for pid %i\n", pid);
+        printf("Couldn't find munmap address for pid %i\n", pid);
         return -1;
     }
 
-    printf("Found munmap address %p on pid %i\n", remote_mmap_addr.p, pid);
+    printf("Found munmap address %p on pid %i\n", remote_munmap_addr.p, pid);
 
     // Attach to process we want to.
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
@@ -664,10 +664,10 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
 
 #ifdef MX64
 
-    // Setup arguments for calling mmap on remote process
+    // Setup arguments for calling munmap on remote process
     regs.rdi = (uintptr_t)addr;                                // addr
     regs.rsi = (((size - 1) / g_page_size) + 1) * g_page_size; // len
-    regs.rax = remote_mmap_addr.ui;
+    regs.rax = remote_munmap_addr.ui;
 
 #else
 
@@ -678,7 +678,7 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
     stack_arguments[0] = (uintptr_t)addr;                                // addr
     stack_arguments[1] = (((size - 1) / g_page_size) + 1) * g_page_size; // len
 
-    regs.eax = remote_mmap_addr.ui;
+    regs.eax = remote_munmap_addr.ui;
 
     printf("Writing arguments on the stack %p on pid %i\n",
            (ptr_t)regs.esp,
