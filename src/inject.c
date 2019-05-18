@@ -216,6 +216,7 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
         // Okay this is good, now we load it for our current process
         // and we can extract the symbol address from remote process.
         lm = (link_map_t*)dlopen(remote_lib.filename.pc, RTLD_LAZY);
+
         if (lm != NULL)
         {
             result.p = dlsym(lm, sym);
@@ -421,7 +422,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> 0x%016X\n", out.p, size, *(long*)&ret);
+        printf("Reading data %p + %zd -> 0x%016lX\n", out.p, size, *(long*)&ret);
         *(long*)(out.ui + size) = *(long*)&ret;
     }
 
@@ -440,7 +441,8 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
-        printf("Writing data %p + %zd -> 0x%016X\n", out.p, size, *(long*)ptr.p);
+        printf(
+            "Writing data %p + %zd -> 0x%016lX\n", out.p, size, *(long*)ptr.p);
 
         ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(long*)ptr.p);
 
@@ -565,9 +567,9 @@ ptr_t remote_mmap(pid_t pid,
     out.ui = regs.ip;
     data.p = shellcode_call;
 
-    write_data(pid, data, bytes_to_write, out);
+    printf("Writing instructions for mmap call on pid %i\n", pid);
 
-    printf("New instructions have been written for mmap call on pid %i\n", pid);
+    write_data(pid, data, bytes_to_write, out);
 
     printf("Executing shellcode on pid %i\n", pid);
 
@@ -610,10 +612,137 @@ ptr_t remote_mmap(pid_t pid,
     return (ptr_t)regs.ax;
 }
 
+int remote_munmap(pid_t pid, ptr_t addr, size_t size)
+{
+#ifndef MX64
+    // Reserve some space into the stack, mmap call have 6 arguments
+    uintptr_t stack_arguments[6];
+#endif
+
+    struct user_regs_struct oldregs, regs;
+    size_t bytes_to_write = sizeof(shellcode_call);
+    uint8_t backup_data[bytes_to_write];
+    ptr_u_t data, out, remote_mmap_addr;
+    int status;
+
+    // Let's find mmap first!
+    remote_mmap_addr = get_remote_sym("libc", "munmap", pid);
+
+    if (remote_mmap_addr.p == NULL)
+    {
+        printf("Couldn't find mmap address for pid %i\n", pid);
+        return -1;
+    }
+
+    printf("Found munmap address %p on pid %i\n", remote_mmap_addr.p, pid);
+
+    // Attach to process we want to.
+    ptrace(PTRACE_ATTACH, pid, NULL, NULL);
+
+    waitpid(pid, &status, 0);
+
+    printf("Attached to %i\n", pid);
+
+    // Obtain its current registers so can backup them.
+    ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
+    memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
+
+    printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
+
+#ifdef MX64
+
+    // Setup arguments for calling mmap on remote process
+    regs.rdi = (uintptr_t)addr;                                // addr
+    regs.rsi = (((size - 1) / g_page_size) + 1) * g_page_size; // len
+    regs.rax = remote_mmap_addr.ui;
+
+#else
+
+    // Arguments are passed through stack here.
+    // Save up some space on stack to prepare our arguments
+    regs.esp -= sizeof(stack_arguments);
+
+    stack_arguments[0] = (uintptr_t)addr;                                // addr
+    stack_arguments[1] = (((size - 1) / g_page_size) + 1) * g_page_size; // len
+
+    regs.eax = remote_mmap_addr.ui;
+
+    printf("Writing arguments on the stack %p on pid %i\n",
+           (ptr_t)regs.esp,
+           pid);
+
+    out.ui = regs.esp;
+    data.p = stack_arguments;
+
+    // Write arguments to the stack
+    write_data(pid, data, sizeof(stack_arguments), out);
+
+#endif
+
+    // Set the new registers
+    ptrace(PTRACE_SETREGS, pid, NULL, &regs);
+
+    // Backup instructions
+    data.ui = regs.ip;
+    out.p = backup_data;
+
+    read_data(pid, data, bytes_to_write, out);
+
+    printf("Data has been read for backing up instructions on pid %i\n", pid);
+
+    // Write shellcode
+    out.ui = regs.ip;
+    data.p = shellcode_call;
+
+    printf("Writing instructions for munmap call on pid %i\n", pid);
+
+    write_data(pid, data, bytes_to_write, out);
+
+    printf("Executing shellcode on pid %i\n", pid);
+
+    // Continue execution & allocate memory with mmap syscall
+    ptrace(PTRACE_CONT, pid, NULL, NULL);
+
+    printf("Waiting for pid %i\n", pid);
+
+    // Wait for the breakpoint (interrupt 3)
+    waitpid(pid, &status, 0);
+
+    // Hopefully it did ran correctly!
+    if (WIFSTOPPED(status))
+    {
+        printf("Done on pid %i with signal %s\n",
+               pid,
+               strsignal(WSTOPSIG(status)));
+    }
+
+    // Get registers again in order to get the return value
+    ptrace(PTRACE_GETREGS, pid, NULL, &regs);
+
+    // Set back the assembly instructions
+    data.p = backup_data;
+    out.ui = oldregs.ip;
+
+    printf("Setting back old instructions at %p on pid %i\n", out.p, pid);
+
+    write_data(pid, data, bytes_to_write, out);
+
+    // Set up old registers back again
+    ptrace(PTRACE_SETREGS, pid, NULL, &oldregs);
+
+    printf("Detaching on pid %i\n", pid);
+
+    // Detach process & let it continue like *nothing happened*
+    ptrace(PTRACE_DETACH, pid, NULL, NULL);
+
+    // Get return value
+    return *(int*)&regs.ax;
+}
+
 ptr_t remote_dlopen(pid_t pid,
                     const char* lib,
                     int flags,
-                    ptr_t remote_allocated_memory)
+                    ptr_t remote_addr_temp)
 {
     char filename[PATH_MAX];
     struct user_regs_struct oldregs, regs;
@@ -656,9 +785,8 @@ ptr_t remote_dlopen(pid_t pid,
 #ifdef false
 
     remote_filename_addr = (uintptr_t)remote_allocated_memory;
-
-    out.ui = remote_filename_addr;
-    data.p = filename;
+    remote_allocated_memory out.ui = remote_filename_addr;
+    remote_allocated_memory data.p = filename;
 
     write_data(pid, data, sizeof(filename), out);
 
@@ -710,19 +838,18 @@ ptr_t remote_dlopen(pid_t pid,
 
 #endif
 
-    regs.ip = (uintptr_t)remote_allocated_memory;
+    regs.ip = (uintptr_t)remote_addr_temp;
 
     // Set the new registers
     ptrace(PTRACE_SETREGS, pid, NULL, &regs);
 
     // Write shellcode
-    out.p = remote_allocated_memory;
+    out.p = remote_addr_temp;
     data.p = shellcode_call;
 
-    write_data(pid, data, bytes_to_write, out);
+    printf("Writing instructions for dlopen call on pid %i\n", pid);
 
-    printf("New instructions have been written for dlopen call on pid %i\n",
-           pid);
+    write_data(pid, data, bytes_to_write, out);
 
     printf("Executing shellcode on pid %i\n", pid);
 
@@ -759,34 +886,58 @@ ptr_t remote_dlopen(pid_t pid,
 
 int main(int cargs, char** args)
 {
+    pid_t pid;
+    ptr_t lib_addr, remote_allocated_memory;
+
     g_page_size = sysconf(_SC_PAGESIZE);
 
-    pid_t pid;
-    printf("Please enter pid\n");
-    scanf("%i", &pid);
+    if (cargs < 3)
+    {
+        printf("Not enourgh arguments, usage: ./inject <pid> <pathtoso>\n");
+        return 0;
+    }
 
-    // Let's preallocate some memory
-    ptr_t remote_allocated_memory = remote_mmap(pid,
-                                                NULL,
-                                                g_page_size * 3,
-                                                PROT_EXEC | PROT_WRITE |
-                                                    PROT_READ,
-                                                MAP_PRIVATE | MAP_ANONYMOUS,
-                                                -1,
-                                                0);
-#ifdef MX64
-    ptr_t dlopen_test = remote_dlopen(pid,
-                                      "/lib/x86_64-linux-gnu/libdl-2.28.so",
-                                      RTLD_LAZY,
-                                      remote_allocated_memory);
-#else
-    ptr_t dlopen_test = remote_dlopen(pid,
-                                      "/lib/i386-linux-gnu/libdl-2.28.so",
-                                      RTLD_LAZY,
-                                      remote_allocated_memory);
-#endif
+    pid = atoi(args[1]);
 
-    printf("dlopen %p mmap test %p\n", dlopen_test, remote_allocated_memory);
+    // Let's preallocate some memory for our shellcode
+    remote_allocated_memory = remote_mmap(pid,
+                                          NULL,
+                                          g_page_size,
+                                          PROT_EXEC | PROT_WRITE | PROT_READ,
+                                          MAP_PRIVATE | MAP_ANONYMOUS,
+                                          -1,
+                                          0);
 
-    return 0;
+    if (remote_allocated_memory == NULL)
+    {
+        printf("Couldn't allocate memory from pid %i\n", pid);
+        return 0;
+    }
+
+    // Load library from remote process
+    lib_addr = remote_dlopen(pid, args[2], RTLD_NOW, remote_allocated_memory);
+
+    if (lib_addr == NULL)
+    {
+        printf("Couldn't dlopen %s from pid %i\n", args[2], pid);
+        return 0;
+    }
+
+    printf("Injected %s on pid %i at address %p\n", args[2], pid, lib_addr);
+
+    // Free memory previously allocated
+    if (remote_munmap(pid, remote_allocated_memory, g_page_size) == -1)
+    {
+        printf("Failed to free page %p from pid %i",
+               remote_allocated_memory,
+               pid);
+
+        return 0;
+    }
+
+    printf("Page on %p has been free'd from pid %i\n",
+           remote_allocated_memory,
+           pid);
+
+    return 1;
 }
