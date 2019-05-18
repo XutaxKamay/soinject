@@ -401,18 +401,14 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 }
 */
 
-// After some testing, I noticed that PTRACE_PEEKDATA returns an int
-// but PTRACE_POKEDATA needs to have a ptr size to actually write correctly the bytes
-// Yeah, why not? I'll look into the kernel
-
 int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
-    int ret;
+    long ret;
     ptr_u_t ptr;
 
     while (size != 0LL)
     {
-        size -= sizeof(int);
+        size -= sizeof(long);
         ptr.ui = addr.ui + size;
 
         ret = ptrace(PTRACE_PEEKDATA, pid, ptr.p, 0);
@@ -425,8 +421,8 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> 0x%08X\n", out.p, size, *(int*)&ret);
-        *(int*)(out.ui + size) = *(int*)&ret;
+        printf("Reading data %p + %zd -> 0x%016X\n", out.p, size, *(long*)&ret);
+        *(long*)(out.ui + size) = *(long*)&ret;
     }
 
     return 1;
@@ -434,24 +430,19 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
 int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
-    int ret;
+    long ret;
     ptr_u_t ptr;
     ptr_u_t ptr_out;
 
     while (size != 0LL)
     {
-        size -= sizeof(ptr_t);
+        size -= sizeof(long);
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
-#ifndef MX64
-        printf("Writing data %p + %zd -> 0x%08X\n", out.p, size, *(ptr_t*)ptr.p);
-#else
-        printf(
-            "Writing data %p + %zd -> 0x%016X\n", out.p, size, *(ptr_t*)ptr.p);
-#endif
+        printf("Writing data %p + %zd -> 0x%016X\n", out.p, size, *(long*)ptr.p);
 
-        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
+        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(long*)ptr.p);
 
         if (ret == -1 && errno != 0)
         {

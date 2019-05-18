@@ -3,7 +3,7 @@ CC=gcc
 # INJECT
 INJECT_INCLUDES = includes/
 INJECT_SRC = src/inject.c
-INJECT_CFLAGS = -g -I$(INJECT_INCLUDES) -ldl
+INJECT_CFLAGS = -g -Wall -I$(INJECT_INCLUDES) -ldl
 INJECT32_DEBUG = inject32.dbg
 INJECT64_DEBUG = inject64.dbg
 INJECT_OBJ32 = $(INJECT_SRC:.c=32.o)
