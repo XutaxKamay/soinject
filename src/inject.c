@@ -60,10 +60,12 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
     {
         count_hex = 0;
 
+        // Is that our library?
         if (strstr(line_buffer, lib))
         {
             memcpy(str_base, line_buffer, str_hex_digits);
 
+            // Count hex digits on the first line to get its base address.
             while (str_base[count_hex] != '-' && count_hex < str_hex_digits)
             {
                 count_hex++;
@@ -71,11 +73,13 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
 
             str_base[count_hex] = '\0';
 
+            // Convert it into a pointer
 #ifndef MX64
             result->base_addr.ui = strtoul(str_base, NULL, 16);
 #else
             result->base_addr.ui = strtoull(str_base, NULL, 16);
 #endif
+            // Find where the filename of the library starts inside the line.
             while (line_buffer[count_hex] != '\n')
             {
                 // We found a path here;
@@ -116,6 +120,7 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     result.p = NULL;
 
+    // Find its symbol so we can calculate its offset
     ptr_sym.p = dlsym(lm, sym);
 
     if (ptr_sym.p == NULL)
@@ -126,8 +131,11 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
         goto ret;
     }
 
+    // Now we can calculate its offset between the base address of the library &
+    // symbol
     ptr_offset.ui = ptr_sym.ui - lm->l_addr;
 
+    // Find now the address from our targeted pid
     get_remote_lib(local_lib.filename.pc, pid, &remote_lib);
 
     if (remote_lib.base_addr.p == NULL)
@@ -136,6 +144,8 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
         goto ret;
     }
 
+    // Now we can calculate the exact address for our remote process with the
+    // offset calculated previously
     result.ui = remote_lib.base_addr.ui + ptr_offset.ui;
 
 ret:
@@ -161,11 +171,11 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
     result.p = NULL;
 
     // Try to open this way first
-    lm = (link_map_t*)dlopen(lib, RTLD_NOW);
+    lm = (link_map_t*)dlopen(lib, RTLD_LAZY);
 
     if (lm == NULL)
     {
-        lm = (link_map_t*)dlopen(NULL, RTLD_NOW);
+        lm = (link_map_t*)dlopen(NULL, RTLD_LAZY);
 
         // Ignore the current process, it's the first into the list.
         dlclose(lm);
@@ -174,15 +184,19 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
 
         while (lm != NULL)
         {
+            // Find our library
             if (lib != NULL)
             {
                 if (!strstr(lm->l_name, lib))
                     goto next;
             }
 
-            lm = (link_map_t*)dlopen(lm->l_name, RTLD_NOW);
+            // If yes then we load it and find its address into the remote
+            // process.
+            lm = (link_map_t*)dlopen(lm->l_name, RTLD_LAZY);
             result = find_remote_sym(lm, sym, pid);
 
+            // Close it once we're done
             dlclose(lm);
 
             if (result.p != NULL)
@@ -190,12 +204,14 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
                 goto ret;
             }
 
+        // Go on next module loaded otherwhise
         next:
             lm = lm->l_next;
         }
     }
     else
     {
+        // We found it on the first try!
         result = find_remote_sym(lm, sym, pid);
         dlclose(lm);
     }
@@ -246,80 +262,81 @@ ret:
 }
 
 /*
-// Old way and eats a lot of ressources. Maybe save it for later just in case.
-static int list_shared_libs(struct dl_phdr_info* info, size_t size, ptr_t
-lib_infos_p)
+ * This is an old way to list all shared libraries from our current process
+ */
+
+static int list_shared_libs(struct dl_phdr_info* info,
+                            size_t size,
+                            ptr_t lib_infos_p)
 {
-        lib_t* curlib;
-        lib_info_t* lib_infos;
+    lib_t* curlib;
+    lib_info_t* lib_infos;
 
-        // Let's avoid our own process.
-        if (*info->dlpi_name == '\0')
-                goto ret;
+    // Let's avoid our own process.
+    if (*info->dlpi_name == '\0')
+        goto ret;
 
-        lib_infos = lib_infos_p;
+    lib_infos = lib_infos_p;
 
-        if (lib_infos->libs == NULL)
-        {
-                lib_infos->libs = malloc(sizeof(lib_t));
-        }
-        else
-        {
-                lib_infos->libs = realloc(lib_infos->libs, (lib_infos->count +
-1) * sizeof(lib_t));
-        }
+    if (lib_infos->libs == NULL)
+    {
+        lib_infos->libs = malloc(sizeof(lib_t));
+    }
+    else
+    {
+        lib_infos->libs = realloc(lib_infos->libs,
+                                  (lib_infos->count + 1) * sizeof(lib_t));
+    }
 
-        curlib = &lib_infos->libs[lib_infos->count];
+    curlib = &lib_infos->libs[lib_infos->count];
 
-        curlib->path = malloc(FILENAME_MAX);
+    // Setup string for filename of library
+    setup_string(&curlib->filename, FILENAME_MAX);
 
-        curlib->base_addr.ui = info->dlpi_addr;
-        strcpy(curlib->path, info->dlpi_name);
+    // Get its base address
+    curlib->base_addr.ui = info->dlpi_addr;
 
-        lib_infos->count++;
+    // Copy filename & setup new length of the filename
+    strcpy(curlib->filename.pc, info->dlpi_name);
+    curlib->filename.len = strlen(curlib->filename.pc);
+
+    // Iterate the number of shared libraries
+    lib_infos->count++;
 
 ret:
-        return 0;
+    return 0;
 }
 
-ptr_u_t find_remote_sym(const char* sym, pid_t pid)
+ptr_u_t find_remote_sym_2(const char* sym, pid_t pid)
 {
-        ptr_u_t result;
-        lib_info_t lib_infos;
-        lib_t* curlib;
-        int i;
+    ptr_u_t result;
+    lib_info_t lib_infos;
+    lib_t* curlib;
+    int i;
 
-        memset(&lib_infos, 0, sizeof(lib_info_t));
+    memset(&lib_infos, 0, sizeof(lib_info_t));
 
-        result.p = NULL;
+    result.p = NULL;
 
-        dl_iterate_phdr(list_shared_libs, &lib_infos);
+    dl_iterate_phdr(list_shared_libs, &lib_infos);
 
-        for (i = 0; i < lib_infos.count; i++)
-        {
-                curlib = &lib_infos.libs[i];
-                result = _find_remote_sym((const char*) curlib->path, sym,
-pid);
+    for (i = 0; i < lib_infos.count; i++)
+    {
+        curlib = &lib_infos.libs[i];
+        free_string(&curlib->filename);
+    }
 
-                if (result.p != NULL)
-                        goto ret;
-        }
+    free(lib_infos.libs);
 
-ret:
-        for (i = 0; i < lib_infos.count; i++)
-        {
-                curlib = &lib_infos.libs[i];
-                free(curlib->path);
-        }
-
-        free(lib_infos.libs);
-
-        return result;
+    return result;
 }
-*/
 
 /*
-int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
+ * This is another way to read/write to virtual process memory rather
+ * than ptrace
+ */
+
+int read_data_2(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
     struct iovec local, remote;
     size_t nread;
@@ -335,6 +352,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     printf("Read %zd bytes\n", nread);
 
+    // Success reading
     if (nread == size)
     {
         for (nread = 0LL; nread < size; nread++)
@@ -354,13 +372,12 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         printf("process_vm_readv failed on pid %i, error: %s\n",
                pid,
                strerror(errno));
-        exit(0);
 
         return 0;
     }
 }
 
-int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
+int write_data_2(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
     struct iovec local, remote;
     size_t nwrite;
@@ -376,6 +393,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     printf("Wrote %zd bytes\n", nwrite);
 
+    // Success writing 
     if (nwrite == size)
     {
         for (nwrite = 0LL; nwrite < size; nwrite++)
@@ -395,12 +413,15 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         printf("process_vm_writev failed on pid %i, error: %s\n",
                pid,
                strerror(errno));
-        exit(0);
 
         return 0;
     }
 }
-*/
+
+/*
+ * Read data to the remote process
+ * Seems like a long is used here to pass data
+ */
 
 int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
@@ -429,6 +450,11 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     return 1;
 }
 
+/*
+ * Write data to the remote process
+ * Seems like a long is used again to pass data
+ */
+
 int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 {
     long ret;
@@ -456,19 +482,6 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     }
 
     return 1;
-}
-
-void swap_endian(unsigned char* addr, size_t len)
-{
-    int i;
-    unsigned char backup_byte;
-
-    for (i = 0; i < len / 2; i++)
-    {
-        backup_byte = addr[i];
-        addr[i] = addr[(len - 1) - i];
-        addr[(len - 1) - i] = backup_byte;
-    }
 }
 
 ptr_t remote_mmap(pid_t pid,
@@ -508,7 +521,7 @@ ptr_t remote_mmap(pid_t pid,
 
     printf("Attached to %i\n", pid);
 
-    // Obtain its current registers so can backup them.
+    // Obtain its current registers so we can set them back again
     ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
     memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
 
@@ -643,7 +656,7 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
 
     printf("Attached to %i\n", pid);
 
-    // Obtain its current registers so can backup them.
+    // Obtain its current registers so we can set them back again
     ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
     memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
 
@@ -700,7 +713,7 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
 
     printf("Executing shellcode on pid %i\n", pid);
 
-    // Continue execution & allocate memory with mmap syscall
+    // Continue execution & allocate memory with munmap syscall
     ptrace(PTRACE_CONT, pid, NULL, NULL);
 
     printf("Waiting for pid %i\n", pid);
@@ -774,14 +787,13 @@ ptr_t remote_dlopen(pid_t pid,
 
     printf("Attached to %i\n", pid);
 
-    // Obtain its current registers so can backup them.
+    // Obtain its current registers so we can set them back again
     ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
     memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-// I've no idea why it doesn't work for both archs here..
-// Weird, needs investigation
+// Might add an option to choose between stack or our allocated page
 #ifdef false
 
     remote_filename_addr = (uintptr_t)remote_allocated_memory;
@@ -915,7 +927,7 @@ int main(int cargs, char** args)
     }
 
     // Load library from remote process
-    lib_addr = remote_dlopen(pid, args[2], RTLD_NOW, remote_allocated_memory);
+    lib_addr = remote_dlopen(pid, args[2], RTLD_LAZY, remote_allocated_memory);
 
     if (lib_addr == NULL)
     {
