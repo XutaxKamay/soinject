@@ -15,8 +15,8 @@
 /*
  * call _ax
  * int3
- * nop (to make it aligned with 16 bits for not corrupting our own stack
- * with the read/write data function)
+ * nop (to make it aligned with sizeof(long) bytes for not corrupting our own
+ * stack with the read/write data function)
  */
 
 uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90, 0x90, 0x90, 0x90, 0x90};
@@ -393,7 +393,7 @@ int write_data_2(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     printf("Wrote %zd bytes\n", nwrite);
 
-    // Success writing 
+    // Success writing
     if (nwrite == size)
     {
         for (nwrite = 0LL; nwrite < size; nwrite++)
