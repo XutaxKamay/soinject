@@ -649,7 +649,7 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
 {
 #ifndef MX64
     // Reserve some space into the stack, mmap call have 6 arguments
-    uintptr_t stack_arguments[6];
+    uintptr_t stack_arguments[2];
 #endif
 
     struct user_regs_struct oldregs, regs;
