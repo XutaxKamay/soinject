@@ -444,9 +444,15 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         }
 
 #ifdef MX64
-        printf("Reading data %p + %zd -> 0x%016lX\n", out.p, size, *(uintptr_t*)&ret);
-#else 
-        printf("Reading data %p + %zd -> 0x%08X\n", out.p, size, *(uintptr_t*)&ret);
+        printf("Reading data %p + %zd -> 0x%016lX\n",
+               out.p,
+               size,
+               *(uintptr_t*)&ret);
+#else
+        printf("Reading data %p + %zd -> 0x%08X\n",
+               out.p,
+               size,
+               *(uintptr_t*)&ret);
 #endif
         *(ptr_t*)(out.ui + size) = *(ptr_t*)&ret;
     }
@@ -472,12 +478,16 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         ptr_out.ui = out.ui + size;
 
 #ifdef MX64
-        printf(
-            "Writing data %p + %zd -> 0x%016lX\n", out.p, size, *(uintptr_t*)ptr.p);
+        printf("Writing data %p + %zd -> 0x%016lX\n",
+               out.p,
+               size,
+               *(uintptr_t*)ptr.p);
 
 #else
-        printf(
-            "Writing data %p + %zd -> 0x%08X\n", out.p, size, *(uintptr_t*)ptr.p);
+        printf("Writing data %p + %zd -> 0x%08X\n",
+               out.p,
+               size,
+               *(uintptr_t*)ptr.p);
 
 #endif
         ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
