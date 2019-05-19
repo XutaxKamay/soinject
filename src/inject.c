@@ -952,11 +952,12 @@ int main(int cargs, char** args)
     if (lib_addr == NULL)
     {
         printf("Couldn't dlopen %s from pid %i\n", args[2], pid);
-        return 0;
+        goto failed_dlopen;
     }
 
     printf("Injected %s on pid %i at address %p\n", args[2], pid, lib_addr);
 
+failed_dlopen:
     // Free memory previously allocated
     if (remote_munmap(pid, remote_allocated_memory, g_page_size) == -1)
     {
