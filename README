@@ -5,5 +5,5 @@ Usage:
 1) Type make when you cloned the repo (you'll need the build-essentials/gcc in order to compile it)
 2) Then run ./inject32.dbg or ./inject64.dbg depending on the process arch you want to inject the shared library in:
 
-./inject32.dbg <process id> <path the the shared library>
-./inject64.dbg <process id> <path the the shared library>
+./inject32.dbg <process id> <path of the shared library>
+./inject64.dbg <process id> <path of the shared library>
