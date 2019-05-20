@@ -816,13 +816,13 @@ ptr_t remote_dlopen(pid_t pid,
 // Might add an option to choose between stack or our allocated page
 #ifdef false
 
-    remote_filename_addr = (uintptr_t)remote_allocated_memory;
-    remote_allocated_memory out.ui = remote_filename_addr;
-    remote_allocated_memory data.p = filename;
+    remote_filename_addr = (uintptr_t)remote_addr_temp;
+    out.ui = remote_filename_addr;
+    data.p = filename;
 
     write_data(pid, data, sizeof(filename), out);
 
-    *(uintptr_t*)(&remote_allocated_memory) += sizeof(filename);
+    *(uintptr_t*)(&remote_addr_temp) += sizeof(filename);
 
 #else
 
@@ -919,7 +919,7 @@ ptr_t remote_dlopen(pid_t pid,
 int main(int cargs, char** args)
 {
     pid_t pid;
-    ptr_t lib_addr, remote_allocated_memory;
+    ptr_t lib_addr, remote_addr_temp;
 
     g_page_size = sysconf(_SC_PAGESIZE);
 
@@ -932,7 +932,7 @@ int main(int cargs, char** args)
     pid = atoi(args[1]);
 
     // Let's preallocate some memory for our shellcode
-    remote_allocated_memory = remote_mmap(pid,
+    remote_addr_temp = remote_mmap(pid,
                                           NULL,
                                           g_page_size,
                                           PROT_EXEC | PROT_WRITE | PROT_READ,
@@ -940,14 +940,14 @@ int main(int cargs, char** args)
                                           -1,
                                           0);
 
-    if (remote_allocated_memory == NULL)
+    if (remote_addr_temp == NULL)
     {
         printf("Couldn't allocate memory from pid %i\n", pid);
         return 0;
     }
 
     // Load library from remote process
-    lib_addr = remote_dlopen(pid, args[2], RTLD_LAZY, remote_allocated_memory);
+    lib_addr = remote_dlopen(pid, args[2], RTLD_LAZY, remote_addr_temp);
 
     if (lib_addr == NULL)
     {
@@ -959,17 +959,17 @@ int main(int cargs, char** args)
 
 failed_dlopen:
     // Free memory previously allocated
-    if (remote_munmap(pid, remote_allocated_memory, g_page_size) == -1)
+    if (remote_munmap(pid, remote_addr_temp, g_page_size) == -1)
     {
         printf("Failed to free page %p from pid %i",
-               remote_allocated_memory,
+               remote_addr_temp,
                pid);
 
         return 0;
     }
 
     printf("Page on %p has been free'd from pid %i\n",
-           remote_allocated_memory,
+           remote_addr_temp,
            pid);
 
     return 1;
