@@ -1,6 +1,7 @@
 #include "../includes/inject.h"
 
 #define OFFSETOF(struct, var) ((uintptr_t)(&((struct*)NULL)->var))
+
 // Prepare registers for different archs
 #ifdef MX64
 #define ip rip
