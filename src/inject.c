@@ -286,11 +286,17 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> %lX\n",
+#ifdef MX64
+        printf("Reading data %p + %zd -> 0x%016lX\n",
                out.p,
                size,
-               *(long*)&ret);
-
+               *(uintptr_t*)&ret);
+#else
+        printf("Reading data %p + %zd -> 0x%08X\n",
+               out.p,
+               size,
+               *(uintptr_t*)&ret);
+#endif
         *(ptr_t*)(out.ui + size) = *(ptr_t*)&ret;
     }
 
@@ -314,11 +320,19 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
-        printf("Writing data %p + %zd -> %lX\n",
+#ifdef MX64
+        printf("Writing data %p + %zd -> 0x%016lX\n",
                out.p,
                size,
-               *(long*)ptr.p);
+               *(uintptr_t*)ptr.p);
 
+#else
+        printf("Writing data %p + %zd -> 0x%08X\n",
+               out.p,
+               size,
+               *(uintptr_t*)ptr.p);
+
+#endif
         ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
 
         if (ret == -1 && errno != 0)
@@ -332,6 +346,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     return 1;
 }
+
 
 ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 {
