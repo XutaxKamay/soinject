@@ -273,7 +273,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(unsigned long);
+        size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
 
         ret = ptrace(PTRACE_PEEKDATA, pid, ptr.p, 0);
@@ -286,12 +286,12 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
             return 0;
         }
 
-        printf("Reading data %p + %zd -> 0x%016lX\n",
+        printf("Reading data %p + %zd -> %lX\n",
                out.p,
                size,
-               *(unsigned long*)&ret);
+               *(long*)&ret);
 
-        *(unsigned long*)(out.ui + size) = *(unsigned long*)&ret;
+        *(ptr_t*)(out.ui + size) = *(ptr_t*)&ret;
     }
 
     return 1;
@@ -310,16 +310,16 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
     while (size != 0LL)
     {
-        size -= sizeof(unsigned long);
+        size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
-        printf("Writing data %p + %zd -> 0x%016lX\n",
+        printf("Writing data %p + %zd -> %lX\n",
                out.p,
                size,
-               *(unsigned long*)ptr.p);
+               *(long*)ptr.p);
 
-        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(unsigned long*)ptr.p);
+        ret = ptrace(PTRACE_POKEDATA, pid, ptr_out.p, *(ptr_t*)ptr.p);
 
         if (ret == -1 && errno != 0)
         {
