@@ -776,7 +776,8 @@ int remote_munmap(pid_t pid, ptr_t addr, size_t size)
 ptr_t remote_dlopen(pid_t pid,
                     const char* lib,
                     int flags,
-                    ptr_t remote_addr_temp)
+                    ptr_t remote_addr_temp,
+                    int use_stack)
 {
     char filename[PATH_MAX];
     struct user_regs_struct oldregs, regs;
@@ -814,34 +815,35 @@ ptr_t remote_dlopen(pid_t pid,
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-// Might add an option to choose between stack or our allocated page
-#ifdef false
+    // Might add an option to choose between stack or our allocated page
+    if (use_stack)
+    {
+        remote_filename_addr = (uintptr_t)remote_addr_temp;
+        out.ui = remote_filename_addr;
+        data.p = filename;
 
-    remote_filename_addr = (uintptr_t)remote_addr_temp;
-    out.ui = remote_filename_addr;
-    data.p = filename;
+        write_data(pid, data, sizeof(filename), out);
 
-    write_data(pid, data, sizeof(filename), out);
+        *(uintptr_t*)(&remote_addr_temp) += sizeof(filename);
+    }
+    else
+    {
+        printf("Reserving some memory on stack for filename on pid %i\n", pid);
 
-    *(uintptr_t*)(&remote_addr_temp) += sizeof(filename);
+        regs.sp -= sizeof(filename);
 
-#else
+        strcpy(filename, lib);
 
-    regs.sp -= sizeof(filename);
+        out.ui = regs.sp;
+        data.p = filename;
 
-    strcpy(filename, lib);
+        // Write it to the stack
+        write_data(pid, data, sizeof(filename), out);
 
-    out.ui = regs.sp;
-    data.p = filename;
+        printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
 
-    // Write it to the stack
-    write_data(pid, data, sizeof(filename), out);
-
-    printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
-
-    remote_filename_addr = regs.sp;
-
-#endif
+        remote_filename_addr = regs.sp;
+    }
 
 #ifdef MX64
 
@@ -934,12 +936,12 @@ int main(int cargs, char** args)
 
     // Let's preallocate some memory for our shellcode
     remote_addr_temp = remote_mmap(pid,
-                                          NULL,
-                                          g_page_size,
-                                          PROT_EXEC | PROT_WRITE | PROT_READ,
-                                          MAP_PRIVATE | MAP_ANONYMOUS,
-                                          -1,
-                                          0);
+                                   NULL,
+                                   g_page_size * 3,
+                                   PROT_EXEC | PROT_WRITE | PROT_READ,
+                                   MAP_PRIVATE | MAP_ANONYMOUS,
+                                   -1,
+                                   0);
 
     if (remote_addr_temp == NULL)
     {
@@ -948,7 +950,7 @@ int main(int cargs, char** args)
     }
 
     // Load library from remote process
-    lib_addr = remote_dlopen(pid, args[2], RTLD_LAZY, remote_addr_temp);
+    lib_addr = remote_dlopen(pid, args[2], RTLD_LAZY, remote_addr_temp, 0);
 
     if (lib_addr == NULL)
     {
@@ -962,16 +964,12 @@ failed_dlopen:
     // Free memory previously allocated
     if (remote_munmap(pid, remote_addr_temp, g_page_size) == -1)
     {
-        printf("Failed to free page %p from pid %i",
-               remote_addr_temp,
-               pid);
+        printf("Failed to free page %p from pid %i", remote_addr_temp, pid);
 
         return 0;
     }
 
-    printf("Page on %p has been free'd from pid %i\n",
-           remote_addr_temp,
-           pid);
+    printf("Page on %p has been free'd from pid %i\n", remote_addr_temp, pid);
 
     return 1;
 }
