@@ -21,9 +21,9 @@
 #include <unistd.h>
 
 #if __x86_64__ || __ppc64__
-#define MX64
+    #define MX64
 #else
-#define MX86
+    #define MX86
 #endif
 
 #define ERR(fmt, ...) printf("Error: " fmt, __VA_ARGS__)

@@ -4,13 +4,13 @@
 
 // Prepare registers for different archs
 #ifdef MX64
-#define ip rip
-#define ax rax
-#define sp rsp
+    #define ip rip
+    #define ax rax
+    #define sp rsp
 #else
-#define ax eax
-#define ip eip
-#define sp esp
+    #define ax eax
+    #define ip eip
+    #define sp esp
 #endif
 
 /*
