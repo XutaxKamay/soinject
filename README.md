@@ -1,4 +1,4 @@
-ntroduction
+## Introduction
 I knew there was a lot of methods of injections around the web but they seemed more complicated than it needed to be or crashed, so I did mine.
 The first method to load your custom shared library is to use LD_PRELOAD. (there is a plenty of tutorials online)
 Second method is actually making your own debugger to call dlopen with your dynamic library path.
