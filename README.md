@@ -60,3 +60,7 @@ If you see injected then your dynamic library should be loaded.
 
 Have fun~
 
+
+## TODO
+- Make another program to call dlclose in order to close shared libraries.
+- Maybe making a GUI & in order to unload/load would be better
