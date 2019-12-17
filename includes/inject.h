@@ -12,12 +12,11 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/user.h>
-#include <sys/uio.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/user.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #if __x86_64__ || __ppc64__
@@ -54,7 +53,6 @@ typedef struct lib_info
 {
     lib_t* libs;
     int count;
-
 } lib_info_t;
 
 typedef uintptr_t (*thread_func_t)(ptr_u_t);
