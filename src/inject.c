@@ -1,16 +1,18 @@
 #include "../includes/inject.h"
 
-#define OFFSETOF(struct, var) ((uintptr_t)(&((struct*)NULL)->var))
+#define OFFSETOF(struct, var) ((uintptr_t)(&((struct*)NULL)->var)
 
 // Prepare registers for different archs
 #ifdef MX64
-#define ip rip
-#define ax rax
-#define sp rsp
+    #define ip rip
+    #define ax rax
+    #define sp rsp
+    #define bp rbp
 #else
-#define ax eax
-#define ip eip
-#define sp esp
+    #define ax eax
+    #define ip eip
+    #define sp esp
+    #define bp ebp
 #endif
 
 /*
@@ -103,9 +105,74 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
         }
     }
 
-ret:
     if (file_maps != NULL)
         fclose(file_maps);
+ret:
+    return;
+}
+
+uintptr_t find_start_stack(pid_t pid)
+{
+    // Who knows maybe some actual path makes it that far...
+    char maps[FILENAME_MAX], line_buffer[FILENAME_MAX + 0x100];
+    char str_base[str_hex_digits + 1];
+    int count_hex;
+    FILE* file_maps;
+    uintptr_t ret;
+
+    ret = 0;
+    file_maps = NULL;
+    sprintf(maps, "/proc/%i/maps", pid);
+    file_maps = fopen(maps, "r");
+
+    if (file_maps == NULL)
+    {
+        goto ret;
+    }
+
+    // Find the first occurence, it's usually the base address of the library.
+    while (fgets(line_buffer, sizeof(line_buffer), file_maps))
+    {
+        count_hex = 0;
+
+        // Is that our stack?
+        if (strstr(line_buffer, "[stack]"))
+        {
+            // Count first hex digits on the first line.
+            while (line_buffer[count_hex] != '-')
+            {
+                count_hex++;
+            }
+
+            // Pass '-' keyword.
+            count_hex++;
+
+            memcpy(str_base, (char*)&line_buffer[count_hex], str_hex_digits);
+
+            // Reset counter
+            count_hex = 0;
+
+            // Count second hex digits on the first line.
+            while (str_base[count_hex] != ' ' && count_hex < str_hex_digits)
+            {
+                count_hex++;
+            }
+
+            str_base[count_hex] = '\0';
+
+            // Convert it into a pointer
+#ifndef MX64
+            ret = strtoul(str_base, NULL, 16);
+#else
+            ret = strtoull(str_base, NULL, 16);
+#endif
+        }
+    }
+
+    if (file_maps != NULL)
+        fclose(file_maps);
+ret:
+    return ret;
 }
 
 ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
@@ -117,7 +184,6 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     // Sometimes they're just symbolic names.
     realpath(lm->l_name, local_lib.filename.pc);
-
     result.p = NULL;
 
     // Find its symbol so we can calculate its offset
@@ -271,7 +337,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     long ret;
     ptr_u_t ptr;
 
-    while (size != 0LL)
+    while (size != 0)
     {
         size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
@@ -288,7 +354,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
 #ifdef MX64
         printf("Reading data %p + %zd -> 0x%016lX\n",
-               out.p,
+               addr.p,
                size,
                *(uintptr_t*)&ret);
 #else
@@ -314,7 +380,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     ptr_u_t ptr;
     ptr_u_t ptr_out;
 
-    while (size != 0LL)
+    while (size != 0)
     {
         size -= sizeof(ptr_t);
         ptr.ui = addr.ui + size;
@@ -347,21 +413,23 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     return 1;
 }
 
-
 ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 {
     char filename[FILENAME_MAX];
+    unsigned char backup_stack[FILENAME_MAX];
     struct user_regs_struct oldregs, regs;
     size_t sizeof_instr_to_wr = sizeof(shellcode_call);
     unsigned char backup_instructions[sizeof_instr_to_wr];
     ptr_u_t data, out, remote_dlopen_addr;
     int status;
     uintptr_t remote_filename_addr;
+    uintptr_t sp_address;
 
 #ifndef MX64
     unsigned char stack_arguments[sizeof(flags) + sizeof(ptr_t)];
 #endif
 
+    memset(filename, 0, sizeof(filename));
     strcpy(filename, lib);
 
     remote_dlopen_addr = get_remote_sym("libc", "__libc_dlopen_mode", pid);
@@ -371,6 +439,21 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
         printf("Couldn't find dlopen on pid: %i\n", pid);
         return NULL;
     }
+
+    // This is to avoid segmentation faults.
+    // Sometimes it writes outside of the stack which results into segmentation
+    // fault. So we find the start of the stack instead to be sure there is
+    // enough space.
+    sp_address = find_start_stack(pid);
+
+    if (sp_address == 0)
+    {
+        printf("Couldn't find stack address on pid: %i\n", pid);
+        return NULL;
+    }
+
+    // Reserve space on stack.
+    sp_address -= sizeof(backup_stack);
 
     printf("Found dlopen address %p on pid %i\n", remote_dlopen_addr.p, pid);
 
@@ -383,31 +466,47 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     // Obtain its current registers so we can set them back again
     ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
+
+    // Ouch we entered into a syscall.
+    // Let's do singlesteps until we're outside of the system call.
+    while (*(int*)&oldregs.ax == -ENOSYS)
+    {
+        printf("Single-stepping (trying to get out of a syscall)\n");
+        
+        ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL);
+        // Wait for the single step
+        waitpid(pid, &status, 0);
+        // Get new registers.
+        ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
+    }
+
     memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
     printf("Reserving some memory on stack for filename on pid %i\n", pid);
 
-    regs.sp -= sizeof(filename);
+    data.ui = sp_address;
+    out.p = backup_stack;
+
+    read_data(pid, data, sizeof(backup_stack), out);
 
     strcpy(filename, lib);
 
-    out.ui = regs.sp;
+    out.ui = sp_address;
     data.p = filename;
 
-    // Write it to the stack
+    // Write filename to the stack
     write_data(pid, data, sizeof(filename), out);
 
-    printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
+    printf("Wrote filename %p on pid %i\n", (ptr_t)sp_address, pid);
 
-    remote_filename_addr = regs.sp;
+    remote_filename_addr = sp_address;
 
 #ifdef MX64
 
     regs.rdi = remote_filename_addr;
     regs.rsi = (uintptr_t)flags;
-    regs.rax = remote_dlopen_addr.ui;
 
 #else
 
@@ -427,16 +526,17 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     write_data(pid, data, sizeof(stack_arguments), out);
 
-    regs.eax = remote_dlopen_addr.ui;
-
 #endif
+
+    regs.ax = remote_dlopen_addr.ui;
 
     out.p = backup_instructions;
     data.ui = regs.ip;
 
     printf("Reading current on instructions on ip address on pid %i\n", pid);
 
-    // Backup next instructions from the current address of the instruction pointer 
+    // Backup next instructions from the current address of the instruction
+    // pointer
     read_data(pid, data, sizeof_instr_to_wr, out);
 
     // Write shellcode
@@ -448,6 +548,11 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     write_data(pid, data, sizeof_instr_to_wr, out);
 
     printf("Executing shellcode on pid %i\n", pid);
+
+    printf("    IP: %p\n", (ptr_t)regs.ip);
+
+    // Set new registers.
+    ptrace(PTRACE_SETREGS, pid, NULL, &regs);
 
     // Continue execution
     ptrace(PTRACE_CONT, pid, NULL, NULL);
@@ -468,7 +573,9 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     // Get registers again in order to get the return value
     ptrace(PTRACE_GETREGS, pid, NULL, &regs);
 
-    out.ui = oldregs.ip;
+    printf("    IP: %p\n", (ptr_t)regs.ip);
+
+    out.ui = regs.ip;
     data.p = backup_instructions;
 
     // Write back the backed up instructions
@@ -477,9 +584,15 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     // Set up old registers back again
     ptrace(PTRACE_SETREGS, pid, NULL, &oldregs);
 
+    out.ui = sp_address;
+    data.p = backup_stack;
+
+    // Restore stack.
+    write_data(pid, data, sizeof(backup_stack), out);
+
     printf("Detaching on pid %i\n", pid);
 
-    // Detach process & let it continue like *nothing happened*
+    // Detach process & let it continue like *nothing happened
     ptrace(PTRACE_DETACH, pid, NULL, NULL);
 
     // Get return value
