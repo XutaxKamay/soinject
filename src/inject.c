@@ -297,7 +297,7 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
                *(uintptr_t*)&ret);
 #else
         printf("    Reading data %p + %zd -> 0x%08X\n",
-               out.p,
+               addr.p,
                size,
                *(uintptr_t*)&ret);
 #endif
@@ -401,7 +401,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
         // Let's do singlesteps until we're outside of the system call.
         // We know that we are outside of it when AX is not equal to 0
         // (We hope that it gets modified inside a wrapper of the syscall
-        // function; but might not always work) 
+        // function; but might not always work)
         // and ORG_AX == -1
         while (!(oldregs.ax != 0 && oldregs.orig_ax == (uintptr_t)-1))
         {
