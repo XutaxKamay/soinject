@@ -129,7 +129,7 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     if (ptr_sym.p == NULL)
     {
-        ERR("couldn't find symbol %s in shared lib %s in current process\n",
+        ERR("Couldn't find symbol %s in shared lib %s in current process\n",
             sym,
             lm->l_name);
         goto ret;
@@ -144,7 +144,7 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     if (remote_lib.base_addr.p == NULL)
     {
-        ERR("couldn't find shared lib %s in pid: %i\n", lm->l_name, pid);
+        ERR("Couldn't find shared lib %s in pid: %i\n", lm->l_name, pid);
         goto ret;
     }
 
@@ -284,19 +284,19 @@ int read_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
         if (errno != 0 && ret == -1)
         {
-            printf("PTRACE_PEEKDATA failed on pid %i error: %s\n",
+            printf("    PTRACE_PEEKDATA failed on pid %i error: %s\n",
                    pid,
                    strerror(errno));
             return 0;
         }
 
 #ifdef MX64
-        printf("Reading data %p + %zd -> 0x%016lX\n",
+        printf("    Reading data %p + %zd -> 0x%016lX\n",
                addr.p,
                size,
                *(uintptr_t*)&ret);
 #else
-        printf("Reading data %p + %zd -> 0x%08X\n",
+        printf("    Reading data %p + %zd -> 0x%08X\n",
                out.p,
                size,
                *(uintptr_t*)&ret);
@@ -325,13 +325,13 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
         ptr_out.ui = out.ui + size;
 
 #ifdef MX64
-        printf("Writing data %p + %zd -> 0x%016lX\n",
+        printf("    Writing data %p + %zd -> 0x%016lX\n",
                out.p,
                size,
                *(uintptr_t*)ptr.p);
 
 #else
-        printf("Writing data %p + %zd -> 0x%08X\n",
+        printf("    Writing data %p + %zd -> 0x%08X\n",
                out.p,
                size,
                *(uintptr_t*)ptr.p);
@@ -341,7 +341,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 
         if (ret == -1 && errno != 0)
         {
-            printf("PTRACE_POKEDATA failed on pid %i error: %s\n",
+            printf("    PTRACE_POKEDATA failed on pid %i error: %s\n",
                    pid,
                    strerror(errno));
             return 0;
@@ -387,7 +387,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     if (WIFSTOPPED(status))
     {
-        printf("Done on pid %i with signal %s (%p %p %p)\n",
+        printf("Done on pid %i with signal %s (ip: %p ax: %p orig_ax: %p)\n",
                pid,
                strsignal(WSTOPSIG(status)),
                (ptr_t)oldregs.ip,
@@ -395,12 +395,14 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
                (ptr_t)oldregs.orig_ax);
     }
 
-    // Let's see if  we entered into a syscall.
+    // Let's see if we entered into a syscall.
     if (oldregs.orig_ax != (uintptr_t)-1)
     {
         // Let's do singlesteps until we're outside of the system call.
-        // We know that we are outside of it when AX is not equal to 0 (since it
-        // used to return the value by the syscall) & ORG_AX == -1
+        // We know that we are outside of it when AX is not equal to 0
+        // (We hope that it gets modified inside a wrapper of the syscall
+        // function; but might not always work) 
+        // and ORG_AX == -1
         while (!(oldregs.ax != 0 && oldregs.orig_ax == (uintptr_t)-1))
         {
             printf("Single-stepping (trying to get out of a syscall)\n");
@@ -413,7 +415,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
             if (WIFSTOPPED(status))
             {
-                printf("Done on pid %i with signal %s (%p %p %p)\n",
+                printf("Done on pid %i with signal %s (ip: %p ax: %p orig_ax: "
+                       "%p)\n",
                        pid,
                        strsignal(WSTOPSIG(status)),
                        (ptr_t)oldregs.ip,
@@ -427,7 +430,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-    printf("    Reserving some memory on stack for filename on pid %i\n", pid);
+    printf("Reserving some memory on stack for filename on pid %i\n", pid);
 
     // Reserve some space for filename.
     lib_len = strlen(lib) + 1;
