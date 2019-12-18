@@ -8,11 +8,13 @@
     #define ax rax
     #define sp rsp
     #define bp rbp
+    #define orig_ax orig_rax
 #else
     #define ax eax
     #define ip eip
     #define sp esp
     #define bp ebp
+    #define orig_ax orig_eax
 #endif
 
 /*
@@ -383,24 +385,49 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     // Obtain its current registers so we can set them back again
     ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
 
-    // Ouch we entered into a syscall.
-    // Let's do singlesteps until we're outside of the system call.
-    while (*(int*)&oldregs.ax == -ENOSYS)
+    if (WIFSTOPPED(status))
     {
-        printf("Single-stepping (trying to get out of a syscall)\n");
+        printf("Done on pid %i with signal %s (%p %p %p)\n",
+               pid,
+               strsignal(WSTOPSIG(status)),
+               (ptr_t)oldregs.ip,
+               (ptr_t)oldregs.ax,
+               (ptr_t)oldregs.orig_ax);
+    }
 
-        ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL);
-        // Wait for the single step
-        waitpid(pid, &status, 0);
-        // Get new registers.
-        ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
+    // Let's see if  we entered into a syscall.
+    if (oldregs.orig_ax != (uintptr_t)-1)
+    {
+        // Let's do singlesteps until we're outside of the system call.
+        // We know that we are outside of it when AX is not equal to 0 (since it
+        // used to return the value by the syscall) & ORG_AX == -1
+        while (!(oldregs.ax != 0 && oldregs.orig_ax == (uintptr_t)-1))
+        {
+            printf("Single-stepping (trying to get out of a syscall)\n");
+
+            ptrace(PTRACE_SINGLESTEP, pid, NULL, NULL);
+            // Wait for the single step
+            waitpid(pid, &status, 0);
+            // Get new registers.
+            ptrace(PTRACE_GETREGS, pid, NULL, &oldregs);
+
+            if (WIFSTOPPED(status))
+            {
+                printf("Done on pid %i with signal %s (%p %p %p)\n",
+                       pid,
+                       strsignal(WSTOPSIG(status)),
+                       (ptr_t)oldregs.ip,
+                       (ptr_t)oldregs.ax,
+                       (ptr_t)oldregs.orig_ax);
+            }
+        }
     }
 
     memcpy(&regs, &oldregs, sizeof(struct user_regs_struct));
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-    printf("Reserving some memory on stack for filename on pid %i\n", pid);
+    printf("    Reserving some memory on stack for filename on pid %i\n", pid);
 
     // Reserve some space for filename.
     lib_len = strlen(lib) + 1;
