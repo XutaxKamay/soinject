@@ -443,7 +443,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     regs.sp -= lib_len;
 
     out.ui = regs.sp;
-    data.p = (ptr_t)lib;
+    data.p = (ptr_t)tmp_filename;
 
     // Write filename to the stack
     write_data(pid, data, lib_len, out);
