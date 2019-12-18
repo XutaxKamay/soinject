@@ -434,6 +434,12 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     // Reserve some space for filename.
     lib_len = strlen(lib) + 1;
+    
+    lib_len += (lib_len % sizeof(uintptr_t));
+
+    char tmp_filename[lib_len];
+    strcpy(tmp_filename, lib);
+
     regs.sp -= lib_len;
 
     out.ui = regs.sp;
