@@ -548,7 +548,7 @@ int main(int cargs, char** args)
 
     if (cargs < 3)
     {
-        printf("Not enourgh arguments, usage: ./inject <pid> <pathtoso>\n");
+        printf("Arguments: <pid> <pathtoso>\n");
         return 0;
     }
 
