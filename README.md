@@ -4,7 +4,7 @@ The first method to load your custom shared library is to use LD_PRELOAD. (there
 Second method is actually making your own debugger to call dlopen with your dynamic library path.
 There might be other methods, but this one worked just fine as a small tool.
 
-Sadly it needs to have two seperate programs for 32 & 64 bits due on how ptrace works.. (Getting registers, writing memory and so on)
+Sadly it needs to have two seperate programs for 32 & 64 bits because of more investigation I need to watch for. (problem with user_regs_struct probably and I'm lazy)
 
 ## Requirements
 - make
