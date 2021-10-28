@@ -4,34 +4,35 @@
 
 // Prepare registers for different archs
 #ifdef MX64
-    #define ip rip
-    #define ax rax
-    #define sp rsp
-    #define bp rbp
+    #define ip      rip
+    #define ax      rax
+    #define sp      rsp
+    #define bp      rbp
     #define orig_ax orig_rax
 #else
-    #define ax eax
-    #define ip eip
-    #define sp esp
-    #define bp ebp
+    #define ax      eax
+    #define ip      eip
+    #define sp      esp
+    #define bp      ebp
     #define orig_ax orig_eax
 #endif
 
 /*
  * call _ax
  * int3
- * nop (to make it aligned with sizeof(long) bytes for not corrupting our own
- * stack with the read/write data function)
+ * nop (to make it aligned with sizeof(long) bytes for not corrupting our
+ * own stack with the read/write data function)
  */
 
-uint8_t shellcode_call[] = {0xFF, 0xD0, 0xCC, 0x90, 0x90, 0x90, 0x90, 0x90};
+uint8_t shellcode_call[] = { 0xFF, 0xD0, 0xCC, 0x90,
+                             0x90, 0x90, 0x90, 0x90 };
 const int str_hex_digits = sizeof(ptr_t) * 2;
 
 void setup_string(string_t* str, size_t maxlen)
 {
-    str->len = 0;
+    str->len    = 0;
     str->maxlen = maxlen;
-    str->pc = (char*)malloc(maxlen);
+    str->pc     = (char*)malloc(maxlen);
     memset(str->pc, 0, maxlen);
 }
 
@@ -49,7 +50,7 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
     int count_hex;
     FILE* file_maps;
 
-    file_maps = NULL;
+    file_maps           = NULL;
     result->base_addr.p = NULL;
     sprintf(maps, "/proc/%i/maps", pid);
     file_maps = fopen(maps, "r");
@@ -59,7 +60,8 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
         goto ret;
     }
 
-    // Find the first occurence, it's usually the base address of the library.
+    // Find the first occurence, it's usually the base address of the
+    // library.
     while (fgets(line_buffer, sizeof(line_buffer), file_maps))
     {
         count_hex = 0;
@@ -70,7 +72,8 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
             memcpy(str_base, line_buffer, str_hex_digits);
 
             // Count hex digits on the first line to get its base address.
-            while (str_base[count_hex] != '-' && count_hex < str_hex_digits)
+            while (str_base[count_hex] != '-'
+                   && count_hex < str_hex_digits)
             {
                 count_hex++;
             }
@@ -83,7 +86,8 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
 #else
             result->base_addr.ui = strtoull(str_base, NULL, 16);
 #endif
-            // Find where the filename of the library starts inside the line.
+            // Find where the filename of the library starts inside the
+            // line.
             while (line_buffer[count_hex] != '\n')
             {
                 // We found a path here;
@@ -95,8 +99,8 @@ void get_remote_lib(const char* lib, pid_t pid, lib_t* result)
                 count_hex++;
             }
 
-            // We can just copy as the path is the last thing we get on the
-            // line.
+            // We can just copy as the path is the last thing we get on
+            // the line.
             strcpy(result->filename.pc, &line_buffer[count_hex]);
             result->filename.len = strlen(result->filename.pc);
             result->filename.len--;
@@ -129,14 +133,15 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
 
     if (ptr_sym.p == NULL)
     {
-        ERR("Couldn't find symbol %s in shared lib %s in current process\n",
+        ERR("Couldn't find symbol %s in shared lib %s in current "
+            "process\n",
             sym,
             lm->l_name);
         goto ret;
     }
 
-    // Now we can calculate its offset between the base address of the library &
-    // symbol
+    // Now we can calculate its offset between the base address of the
+    // library & symbol
     ptr_offset.ui = ptr_sym.ui - lm->l_addr;
 
     // Find now the address from our targeted pid
@@ -148,8 +153,8 @@ ptr_u_t find_remote_sym(link_map_t* lm, const char* sym, pid_t pid)
         goto ret;
     }
 
-    // Now we can calculate the exact address for our remote process with the
-    // offset calculated previously
+    // Now we can calculate the exact address for our remote process with
+    // the offset calculated previously
     result.ui = remote_lib.base_addr.ui + ptr_offset.ui;
 
 ret:
@@ -160,9 +165,9 @@ ret:
     return result;
 }
 
-// TODO: There is still a case where the remote process haven't the library
-// loaded.. So we can just use this function to get dlopen and load our libs on
-// the remote process!
+// TODO: There is still a case where the remote process haven't the
+// library loaded.. So we can just use this function to get dlopen and
+// load our libs on the remote process!
 
 ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
 {
@@ -197,7 +202,7 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
 
             // If yes then we load it and find its address into the remote
             // process.
-            lm = (link_map_t*)dlopen(lm->l_name, RTLD_LAZY);
+            lm     = (link_map_t*)dlopen(lm->l_name, RTLD_LAZY);
             result = find_remote_sym(lm, sym, pid);
 
             // Close it once we're done
@@ -243,7 +248,9 @@ ptr_u_t get_remote_sym(const char* lib, const char* sym, pid_t pid)
 
             if (result.p == NULL)
             {
-                ERR("Couldn't find %s(%s) from current process...\n", lib, sym);
+                ERR("Couldn't find %s(%s) from current process...\n",
+                    lib,
+                    sym);
                 goto ret;
             }
 
@@ -321,7 +328,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
     while (size != 0)
     {
         size -= sizeof(ptr_t);
-        ptr.ui = addr.ui + size;
+        ptr.ui     = addr.ui + size;
         ptr_out.ui = out.ui + size;
 
 #ifdef MX64
@@ -373,7 +380,9 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
         return NULL;
     }
 
-    printf("Found dlopen address %p on pid %i\n", remote_dlopen_addr.p, pid);
+    printf("Found dlopen address %p on pid %i\n",
+           remote_dlopen_addr.p,
+           pid);
 
     // Attach to process we want to.
     ptrace(PTRACE_ATTACH, pid, NULL, NULL);
@@ -387,7 +396,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     if (WIFSTOPPED(status))
     {
-        printf("Done on pid %i with signal %s (ip: %p ax: %p orig_ax: %p)\n",
+        printf("Done on pid %i with signal %s (ip: %p ax: %p orig_ax: "
+               "%p)\n",
                pid,
                strsignal(WSTOPSIG(status)),
                (ptr_t)oldregs.ip,
@@ -415,7 +425,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
             if (WIFSTOPPED(status))
             {
-                printf("Done on pid %i with signal %s (ip: %p ax: %p orig_ax: "
+                printf("Done on pid %i with signal %s (ip: %p ax: %p "
+                       "orig_ax: "
                        "%p)\n",
                        pid,
                        strsignal(WSTOPSIG(status)),
@@ -430,11 +441,12 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     printf("Got regs (ip: %p) on pid %i\n", (ptr_t)regs.ip, pid);
 
-    printf("Reserving some memory on stack for filename on pid %i\n", pid);
+    printf("Reserving some memory on stack for filename on pid %i\n",
+           pid);
 
     // Reserve some space for filename.
     lib_len = strlen(lib) + 1;
-    
+
     lib_len -= (lib_len % sizeof(uintptr_t));
     lib_len += sizeof(uintptr_t);
 
@@ -480,13 +492,14 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     regs.ax = remote_dlopen_addr.ui;
 
-    out.p = backup_instructions;
+    out.p   = backup_instructions;
     data.ui = regs.ip;
 
-    printf("Reading current on instructions on ip address on pid %i\n", pid);
+    printf("Reading current on instructions on ip address on pid %i\n",
+           pid);
 
-    // Backup next instructions from the current address of the instruction
-    // pointer
+    // Backup next instructions from the current address of the
+    // instruction pointer
     read_data(pid, data, sizeof_instr_to_wr, out);
 
     // Write shellcode
@@ -563,7 +576,10 @@ int main(int cargs, char** args)
         return 0;
     }
 
-    printf("Injected %s on pid %i at address %p\n", args[2], pid, lib_addr);
+    printf("Injected %s on pid %i at address %p\n",
+           args[2],
+           pid,
+           lib_addr);
 
     return 1;
 }
