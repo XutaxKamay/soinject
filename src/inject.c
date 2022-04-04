@@ -1,4 +1,5 @@
 #include "../includes/inject.h"
+#include <linux/limits.h>
 
 #define OFFSETOF(struct, var) ((uintptr_t)(&((struct*)NULL)->var)
 
@@ -24,9 +25,9 @@
  * own stack with the read/write data function)
  */
 
-uint8_t shellcode_call[] = { 0xFF, 0xD0, 0xCC, 0x90,
-                             0x90, 0x90, 0x90, 0x90 };
-const int str_hex_digits = sizeof(ptr_t) * 2;
+const uint8_t shellcode_call[] = { 0xFF, 0xD0, 0xCC, 0x90,
+                                   0x90, 0x90, 0x90, 0x90 };
+const int str_hex_digits       = sizeof(ptr_t) * 2;
 
 void setup_string(string_t* str, size_t maxlen)
 {
@@ -361,7 +362,7 @@ int write_data(pid_t pid, ptr_u_t addr, size_t size, ptr_u_t out)
 ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 {
     struct user_regs_struct oldregs, regs;
-    size_t sizeof_instr_to_wr = sizeof(shellcode_call);
+    const size_t sizeof_instr_to_wr = sizeof(shellcode_call);
     unsigned char backup_instructions[sizeof_instr_to_wr];
     ptr_u_t data, out, remote_dlopen_addr;
     int status;
@@ -372,7 +373,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     unsigned char stack_arguments[sizeof(flags) + sizeof(ptr_t)];
 #endif
 
-    remote_dlopen_addr = get_remote_sym("libc", "__libc_dlopen_mode", pid);
+    // __libc_dlopen_mode has changed to dlopen
+    remote_dlopen_addr = get_remote_sym("libc", "dlopen", pid);
 
     if (remote_dlopen_addr.p == NULL)
     {
@@ -450,8 +452,8 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     lib_len -= (lib_len % sizeof(uintptr_t));
     lib_len += sizeof(uintptr_t);
 
-    char tmp_filename[lib_len];
-    strcpy(tmp_filename, lib);
+    char tmp_filename[PATH_MAX];
+    strncpy(tmp_filename, lib, sizeof(tmp_filename));
 
     regs.sp -= lib_len;
 
@@ -504,7 +506,7 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 
     // Write shellcode
     out.ui = regs.ip;
-    data.p = shellcode_call;
+    data.p = (ptr_t)shellcode_call;
 
     printf("Writing instructions for dlopen call on pid %i\n", pid);
 
