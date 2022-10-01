@@ -363,11 +363,11 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
 {
     struct user_regs_struct oldregs, regs;
     const size_t sizeof_instr_to_wr = sizeof(shellcode_call);
-    unsigned char backup_instructions[sizeof_instr_to_wr];
+    unsigned char backup_instructions[sizeof(shellcode_call)];
     ptr_u_t data, out, remote_dlopen_addr;
     int status;
     uintptr_t remote_filename_addr;
-    int lib_len;
+    char tmp_filename[PATH_MAX];
 
 #ifndef MX64
     unsigned char stack_arguments[sizeof(flags) + sizeof(ptr_t)];
@@ -446,22 +446,18 @@ ptr_t remote_dlopen(pid_t pid, const char* lib, int flags)
     printf("Reserving some memory on stack for filename on pid %i\n",
            pid);
 
-    // Reserve some space for filename.
-    lib_len = strlen(lib) + 1;
-
-    lib_len -= (lib_len % sizeof(uintptr_t));
-    lib_len += sizeof(uintptr_t);
-
-    char tmp_filename[PATH_MAX];
     strncpy(tmp_filename, lib, sizeof(tmp_filename));
 
-    regs.sp -= lib_len;
+    regs.sp -= sizeof(tmp_filename);
+
+    // align stack due to old bugs
+    regs.sp -= regs.sp % 32;
 
     out.ui = regs.sp;
     data.p = (ptr_t)tmp_filename;
 
     // Write filename to the stack
-    write_data(pid, data, lib_len, out);
+    write_data(pid, data, sizeof(tmp_filename), out);
 
     printf("Wrote filename %p on pid %i\n", (ptr_t)regs.sp, pid);
 
